@@ -3,6 +3,7 @@ package flashcart
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/ladecadence/GBShooperGo/pkg/comms"
 )
@@ -10,11 +11,123 @@ import (
 const (
 	GBS_ID    = 0x17 // 23 decimal
 	SLEEPTIME = 3
+
+	// Sizes
+	S_0K    = 0
+	S_2K    = 2048
+	S_8K    = 8192
+	S_32K   = 32768
+	S_64K   = 65536
+	S_128K  = 131072
+	S_256K  = 262144
+	S_512K  = 524288
+	S_1MB   = 1048576
+	S_2MB   = 2097152
+	S_4MB   = 4194304
+	S_1_1MB = 1179648
+	S_1_2MB = 1310720
+	S_1_5MB = 1572864
 )
 
 type Status struct {
 	VersionMayor uint8
 	VersionMinor uint8
+}
+
+type FlashID struct {
+	ManufacturerID uint8
+	ChipID         uint8
+	Manufacturer   string
+	Chip           string
+}
+
+type RomHeader struct {
+	Title    string
+	Cart     string
+	CartType uint8
+	ROMSize  uint8
+	RAMSize  uint8
+	ROM      string
+	RAM      string
+	ROMBytes int
+	RAMBytes int
+}
+
+type FlashProducer struct {
+	ID   uint8
+	Name string
+}
+
+type FlashNames struct {
+	ID   uint8
+	Name string
+}
+
+type CartType struct {
+	ID   uint8
+	Type string
+}
+
+type ROMSize struct {
+	ID   uint8
+	Name string
+	Size int
+}
+
+type RAMSize struct {
+	ID   uint8
+	Name string
+	Size int
+}
+
+// flash chip producers
+var FlashProducers = []FlashProducer{
+	{0x01, "AMD"}, {0x02, "AMI"}, {0xe5, "Analog Devices"},
+	{0x1f, "Atmel"}, {0x31, "Catalyst"}, {0x34, "Cypress"},
+	{0x04, "Fujitsu"}, {0xE0, "Goldstar"}, {0x07, "Hitachi"},
+	{0xad, "Hyundai"}, {0xc1, "Infineon"}, {0x89, "Intel"},
+	{0xd5, "Intg. Silicon Systems"}, {0xc2, "Macronix"}, {0x29, "Microchip"},
+	{0x2c, "Micron"}, {0x1c, "Mitsubishi"}, {0x10, "Nec"},
+	{0x15, "Philips Semiconductors"}, {0xce, "Samsung"}, {0x62, "Sanyo"},
+	{0x20, "SGS Thomson"}, {0xb0, "Sharp"}, {0xbf, "SST"},
+	{0x97, "Texas Instruments"}, {0x98, "Toshiba"}, {0xda, "Winbond"},
+	{0x19, "Xicor"}, {0xc9, "Xilinx"},
+}
+
+// flash chip IDs
+var ChipIDs = []FlashNames{
+	{0xA4, "29F040B"}, {0xAD, "AM29F016"},
+}
+
+// Cartridge types
+var CartTypes = []CartType{
+	{0x00, "ROM ONLY"}, {0x01, "ROM+MBC1"},
+	{0x02, "ROM+MBC1+RAM"}, {0x03, "ROM+MBC1+RAM+BATT"},
+	{0x05, "ROM+MBC2"}, {0x06, "ROM+MBC2+BATTERY"},
+	{0x08, "ROM+RAM"}, {0x09, "ROM+RAM+BATTERY"},
+	{0x11, "ROM+MBC3"},
+	{0x0b, "ROM+MMMO1"}, {0x0c, "ROM+MMMO1+SRAM"},
+	{0x0d, "ROM+MMMO1+SRAM+BATT"}, {0x0f, "ROM+MBC3+TIMER+BATT"},
+	{0x10, "ROM+MBC3+TIMER+RAM+BAT"}, {0x12, "ROM+MBC3+RAM"},
+	{0x13, "ROM+MBC3+RAM+BATT"}, {0x19, "ROM+MBC5"},
+	{0x1a, "ROM+MBC5+RAM"}, {0x1b, "ROM+MBC5+RAM+BATT"},
+	{0x1c, "ROM+MBC5+RUMBLE"}, {0x1d, "ROM+MBC5+RUMBLE+SRAM"},
+	{0x1e, "ROM+MBC5+RUMBLE+SRAM+BATT"}, {0x1f, "Pocket Camera"},
+	{0xfd, "Bandai TAMA5"}, {0xfe, "Hudson HuC-3"},
+}
+
+// ROM Sizes
+var ROMSizes = []ROMSize{
+	{0x00, "32KB", S_32K}, {0x01, "64KB", S_64K}, {0x02, "128KB", S_128K},
+	{0x03, "256KB", S_256K}, {0x04, "512KB", S_512K}, {0x05, "1MB", S_1MB},
+	{0x06, "2MB", S_2MB}, {0x07, "4MB", S_4MB}, {0x52, "1.1MB", S_1_1MB},
+	{0x53, "1.2MB", S_1_2MB}, {0x54, "1.5MB", S_1_5MB},
+}
+
+// RAM sizes
+var RAMSizes = []RAMSize{
+	{0x00, "0KB", S_0K}, {0x01, "2KB", S_2K}, {0x02, "8KB", S_2K},
+	{0x03, "32KB", S_32K}, {0x04, "128KB", S_128K},
 }
 
 func GBSStatus() (Status, error) {
@@ -59,4 +172,122 @@ func GBSStatus() (Status, error) {
 
 	// ok
 	return status, nil
+}
+
+func GBSChipID() (FlashID, error) {
+	id := FlashID{}
+	gbs := comms.GBSDevice{}
+	err := gbs.Open()
+	if err != nil {
+		return FlashID{}, err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// create packet
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_ID}
+	// send it
+	gbs.SendPacket(packet)
+
+	// read answer (2 packets)
+	packet, err = gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		return FlashID{}, err
+	}
+
+	id.ManufacturerID = packet.Data
+
+	packet, err = gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		return FlashID{}, err
+	}
+	id.ChipID = packet.Data
+
+	if idx := slices.IndexFunc(FlashProducers, func(c FlashProducer) bool { return c.ID == id.ManufacturerID }); idx != -1 {
+		id.Manufacturer = FlashProducers[idx].Name
+	} else {
+		id.Manufacturer = fmt.Sprintf("Unknown manufacurer: 0x%0x", id.ManufacturerID)
+	}
+
+	if idx := slices.IndexFunc(ChipIDs, func(c FlashNames) bool { return c.ID == id.ChipID }); idx != -1 {
+		id.Chip = ChipIDs[idx].Name
+	} else {
+		id.Chip = fmt.Sprintf("Unknown Flash chip: 0x%0x", id.ChipID)
+	}
+
+	// ok
+	return id, nil
+}
+
+func GBSReadHeader() (RomHeader, error) {
+	header := RomHeader{}
+	gbs := comms.GBSDevice{}
+	err := gbs.Open()
+	if err != nil {
+		return RomHeader{}, err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// create packet
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_READ_HEADER}
+	// send it
+	gbs.SendPacket(packet)
+
+	// read answer ( first 3 packets)
+	// pkt1 = mapper, pkt2 = rom size, pkt3 = ram_size
+	packet, err = gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		return RomHeader{}, err
+	}
+	header.CartType = packet.Data
+
+	packet, err = gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		return RomHeader{}, err
+	}
+	header.ROMSize = packet.Data
+
+	packet, err = gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		return RomHeader{}, err
+	}
+	header.RAMSize = packet.Data
+
+	// now read cart name (16 bytes)
+	for range 16 {
+		packet, err = gbs.ReceivePacket(SLEEPTIME)
+		if err != nil {
+			return RomHeader{}, err
+		}
+		header.Title += string(packet.Data)
+	}
+
+	// fill types
+	// fill types
+	if idx := slices.IndexFunc(CartTypes, func(c CartType) bool { return c.ID == header.CartType }); idx != -1 {
+		header.Cart = CartTypes[idx].Type
+	} else {
+		header.Cart = "Unknown cart type"
+	}
+
+	if idx := slices.IndexFunc(ROMSizes, func(c ROMSize) bool { return c.ID == header.ROMSize }); idx != -1 {
+		header.ROMBytes = ROMSizes[idx].Size
+		header.ROM = ROMSizes[idx].Name
+	} else {
+		header.ROMBytes = 0
+		header.ROM = "Unknown ROM size"
+	}
+
+	// fill types
+	if idx := slices.IndexFunc(RAMSizes, func(c RAMSize) bool { return c.ID == header.RAMSize }); idx != -1 {
+		header.RAMBytes = RAMSizes[idx].Size
+		header.RAM = RAMSizes[idx].Name
+	} else {
+		header.RAMBytes = 0
+		header.RAM = "Unknown RAM size"
+	}
+
+	// ok
+	return header, nil
 }

@@ -21,6 +21,18 @@ const (
 	TYPE_DATA    = 0x22
 	TYPE_STAT    = 0x33
 	TYPE_INFO    = 0x44
+
+	// Commands
+	CMD_ID          = 0x11
+	CMD_READ_FLASH  = 0x22
+	CMD_READ_RAM    = 0x33
+	CMD_PRG_FLASH   = 0x44
+	CMD_PRG_RAM     = 0x55
+	CMD_ERASE_FLASH = 0x66
+	CMD_ERASE_RAM   = 0x77
+	CMD_READ_HEADER = 0x88
+	CMD_ERR         = 0xEE
+	CMD_END         = 0xFF
 )
 
 type Packet struct {

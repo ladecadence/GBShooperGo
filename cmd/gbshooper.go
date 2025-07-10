@@ -56,7 +56,34 @@ func main() {
 			os.Exit(1)
 		}
 		GBSVersion()
-		fmt.Println(color.Green + "🔩 Hardware version: " + string(status.VersionMayor) + "." + string(status.VersionMinor) + color.Reset)
+		fmt.Println(color.Green + "🔩 Hardware version: " + color.Purple + string(status.VersionMayor) + "." + string(status.VersionMinor) + color.Reset)
+		os.Exit(0)
+	}
+
+	if os.Args[1] == "--id" {
+		id, err := flashcart.GBSChipID()
+		if err != nil {
+			fmt.Println("❌ " + color.Red + "Hardware error: ")
+			fmt.Println(err.Error() + color.Reset)
+			os.Exit(1)
+		}
+		GBSVersion()
+		fmt.Println(color.Green + "🪪  Flash chip ID: " + id.Manufacturer + ", " + id.Chip + color.Reset)
+		os.Exit(0)
+	}
+
+	if os.Args[1] == "--read-header" {
+		header, err := flashcart.GBSReadHeader()
+		if err != nil {
+			fmt.Println("❌ " + color.Red + "Hardware error: ")
+			fmt.Println(err.Error() + color.Reset)
+			os.Exit(1)
+		}
+		GBSVersion()
+		fmt.Println(color.Green + "👤 Cart name: " + color.Purple + header.Title + color.Reset)
+		fmt.Println(color.Green + "🫆  Cart type: " + color.Purple + header.Cart + color.Reset)
+		fmt.Println(color.Green + "📏 ROM size: " + color.Purple + header.ROM + color.Reset)
+		fmt.Println(color.Green + "📐 RAM size: " + color.Purple + header.RAM + color.Reset)
 		os.Exit(0)
 	}
 
