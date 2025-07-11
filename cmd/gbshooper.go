@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
+
+	"github.com/briandowns/spinner"
 
 	"github.com/ladecadence/GBShooperGo/pkg/color"
 	"github.com/ladecadence/GBShooperGo/pkg/flashcart"
@@ -87,4 +90,20 @@ func main() {
 		os.Exit(0)
 	}
 
+	if os.Args[1] == "--erase-flash" {
+		GBSVersion()
+		fmt.Println(color.Yellow + "🧼 Erasing FLASH... " + color.Reset)
+		s := spinner.New(spinner.CharSets[4], 100*time.Millisecond)
+		s.Start()
+		err := flashcart.GBSEraseFlash()
+		if err != nil {
+			s.Stop()
+			fmt.Println("❌ " + color.Red + "Error: ")
+			fmt.Println(err.Error() + color.Reset)
+			os.Exit(1)
+		}
+		s.Stop()
+		fmt.Println(color.Green + "✅ FLASH erased." + color.Reset)
+
+	}
 }

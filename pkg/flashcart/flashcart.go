@@ -11,6 +11,12 @@ import (
 const (
 	GBS_ID    = 0x17 // 23 decimal
 	SLEEPTIME = 3
+	ERASETIME = 60
+
+	// status
+	STAT_OK      = 0x14 // 10.4 ;-)
+	STAT_ERROR   = 0xEE
+	STAT_TIMEOUT = 0xAA
 
 	// Sizes
 	S_0K    = 0
@@ -290,4 +296,30 @@ func GBSReadHeader() (RomHeader, error) {
 
 	// ok
 	return header, nil
+}
+
+func GBSEraseFlash() error {
+	gbs := comms.GBSDevice{}
+	err := gbs.Open()
+	if err != nil {
+		return err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// create packet
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_ERASE_FLASH}
+	// send it
+	gbs.SendPacket(packet)
+
+	// read answer
+	packet, err = gbs.ReceivePacket(ERASETIME)
+	if err != nil {
+		return err
+	}
+	if packet.Data == STAT_OK {
+		return nil
+	} else {
+		return errors.New("Error erasing flash")
+	}
 }
