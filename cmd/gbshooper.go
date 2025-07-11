@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/briandowns/spinner"
+	"github.com/schollz/progressbar/v3"
 
 	"github.com/ladecadence/GBShooperGo/pkg/color"
 	"github.com/ladecadence/GBShooperGo/pkg/flashcart"
@@ -93,17 +93,65 @@ func main() {
 	if os.Args[1] == "--erase-flash" {
 		GBSVersion()
 		fmt.Println(color.Yellow + "🧼 Erasing FLASH... " + color.Reset)
-		s := spinner.New(spinner.CharSets[4], 100*time.Millisecond)
-		s.Start()
+		bar := progressbar.NewOptions(-1, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			bar.Add(1)
+		}()
 		err := flashcart.GBSEraseFlash()
 		if err != nil {
-			s.Stop()
+			bar.Clear()
 			fmt.Println("❌ " + color.Red + "Error: ")
 			fmt.Println(err.Error() + color.Reset)
 			os.Exit(1)
 		}
-		s.Stop()
+		bar.Clear()
 		fmt.Println(color.Green + "✅ FLASH erased." + color.Reset)
+	}
 
+	if os.Args[1] == "--write-flash" {
+		if len(os.Args) < 3 {
+			GBSHelp()
+			os.Exit(1)
+		}
+
+		romFile := os.Args[2]
+
+		// check we can open the file
+		rom, err := os.Open(romFile)
+		if err != nil {
+			fmt.Println("❌ "+color.Red+"Can't open file: ", os.Args[2])
+			os.Exit(1)
+		}
+		rom.Close()
+
+		// sync
+		progress := make(chan int64)
+		finished := make(chan bool)
+
+		// start
+		bar := progressbar.NewOptions(100, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetWidth(20), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
+		GBSVersion()
+		fmt.Println(color.Yellow + "📝 Writing FLASH... " + color.Reset)
+		go func() {
+			err = flashcart.GBSWriteFlash(romFile, finished, progress)
+		}()
+	outer:
+		for {
+			select {
+			case <-finished:
+				break outer
+			case percent := <-progress:
+				bar.Set(int(percent))
+			}
+		}
+
+		if err != nil {
+			bar.Clear()
+			fmt.Println("❌ "+color.Red+"Error writing flash: ", err.Error())
+			os.Exit(1)
+		}
+		bar.Clear()
+		fmt.Println(color.Green + "✅ FLASH written." + color.Reset)
 	}
 }

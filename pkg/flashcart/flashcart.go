@@ -3,15 +3,18 @@ package flashcart
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"slices"
 
 	"github.com/ladecadence/GBShooperGo/pkg/comms"
 )
 
 const (
-	GBS_ID    = 0x17 // 23 decimal
-	SLEEPTIME = 3
-	ERASETIME = 60
+	GBS_ID      = 0x17 // 23 decimal
+	SLEEPTIME   = 3
+	ERASETIME   = 60
+	BUFFER_SIZE = 256
 
 	// status
 	STAT_OK      = 0x14 // 10.4 ;-)
@@ -322,4 +325,107 @@ func GBSEraseFlash() error {
 	} else {
 		return errors.New("Error erasing flash")
 	}
+}
+
+func GBSWriteFlash(filename string, finished chan bool, progress chan int64) error {
+	// finishing
+	defer func() { finished <- true }()
+
+	// open rom file
+	rom, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer rom.Close()
+
+	// get file size
+	stats, err := rom.Stat()
+	if err != nil {
+		return err
+	}
+	romSize := stats.Size()
+
+	// open GBShooper
+	gbs := comms.GBSDevice{}
+	err = gbs.Open()
+	if err != nil {
+		return err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// and start writing
+	var chunkCounter int64 = 0
+	buffer := make([]byte, BUFFER_SIZE)
+
+	// create packet
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_PRG_FLASH}
+	// send it
+	gbs.SendPacket(packet)
+
+	stat, err := gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+		// send it
+		gbs.SendPacket(packet)
+		return err
+	}
+	if stat.Data == STAT_OK {
+		for {
+			// calculate percentage
+			percent := (100 * chunkCounter * BUFFER_SIZE) / romSize
+			progress <- percent
+
+			// read a chunk
+			_, err := rom.Read(buffer)
+			if err != nil {
+				// end?
+				if err == io.EOF {
+					break
+				}
+
+			}
+			// checksum
+			var check uint8 = 0
+			for i := 0; i < BUFFER_SIZE; i++ {
+				check += buffer[i]
+			}
+
+			// send the data
+			err = gbs.SendBuffer(buffer)
+			// get answer
+			stat, err := gbs.ReceivePacket(SLEEPTIME)
+			// checksum correct?
+			if stat.Data != check {
+				packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+				// send it
+				gbs.SendPacket(packet)
+				return errors.New("Bad checksum")
+			}
+
+			// EOF?
+			c := make([]uint8, 1)
+			_, err = rom.Read(c)
+			if err != io.EOF {
+				// ok, keep writing
+				rom.Seek(-1, 1)
+				packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_PRG_FLASH}
+				// send it
+				gbs.SendPacket(packet)
+				chunkCounter++
+			}
+
+		}
+	} else {
+		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+		// send it
+		gbs.SendPacket(packet)
+		return errors.New("Problem with hardware, can't write to Flash")
+	}
+
+	// end
+	packet = comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+	// send it
+	gbs.SendPacket(packet)
+	return nil
 }
