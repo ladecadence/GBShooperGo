@@ -387,7 +387,7 @@ func GBSWriteFlash(filename string, finished chan bool, progress chan int64) err
 			}
 			// checksum
 			var check uint8 = 0
-			for i := 0; i < BUFFER_SIZE; i++ {
+			for i := range BUFFER_SIZE {
 				check += buffer[i]
 			}
 
