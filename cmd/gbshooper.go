@@ -18,7 +18,7 @@ const (
 )
 
 func GBSHelp() {
-	fmt.Println(color.Green + "⚡ GBShooperGo version: " + color.Purple + strconv.Itoa(VER_MAYOR) + "." + strconv.Itoa(VER_MINOR) + color.Reset)
+	fmt.Println(color.Green + "☄️  GBShooperGo version: " + color.Purple + strconv.Itoa(VER_MAYOR) + "." + strconv.Itoa(VER_MINOR) + color.Reset)
 	fmt.Println("David Pello 2025")
 	fmt.Println()
 	fmt.Println("Usage:")
@@ -54,7 +54,7 @@ func GBSHelp() {
 }
 
 func GBSVersion() {
-	fmt.Println(color.Green + "⚡ GBShooper version: " + color.Purple + strconv.Itoa(VER_MAYOR) + "." + strconv.Itoa(VER_MINOR) + color.Reset)
+	fmt.Println(color.Green + "☄️  GBShooper version: " + color.Purple + strconv.Itoa(VER_MAYOR) + "." + strconv.Itoa(VER_MINOR) + color.Reset)
 }
 
 func main() {
@@ -397,7 +397,7 @@ func main() {
 		// start
 		bar := progressbar.NewOptions(100, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetWidth(20), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
 		GBSVersion()
-		fmt.Println(color.Yellow + "🧼  Erasing RAM... " + color.Reset)
+		fmt.Println(color.Yellow + "🧼 Erasing RAM... " + color.Reset)
 		go func() {
 			flashcart.GBSEraseRAM(size, finished, progress, errchan)
 		}()
