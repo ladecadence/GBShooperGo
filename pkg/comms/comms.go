@@ -2,7 +2,6 @@ package comms
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ziutek/ftdi"
@@ -87,21 +86,20 @@ func (gbs *GBSDevice) SendPacket(packet Packet) error {
 }
 
 func (gbs *GBSDevice) ReceiveByte(timeout time.Duration) (uint8, error) {
-	var data uint8
-	var err error
+	var data []uint8 = make([]uint8, 1)
 
 	// timeout
 	received := false
 	for start := time.Now(); time.Since(start) < (timeout * time.Second); {
-		data, err = gbs.Dev.ReadByte()
-		if err == nil {
+		num, _ := gbs.Dev.Read(data)
+		if num == 1 {
 			received = true
 			break
 		}
 	}
 	if received {
-		fmt.Printf("Byte: %x\n", data)
-		return data, nil
+		//fmt.Printf("Byte: %x\n", data)
+		return data[0], nil
 	} else {
 		return 0, errors.New("Timeout")
 	}
