@@ -429,3 +429,79 @@ func GBSWriteFlash(filename string, finished chan bool, progress chan int64) err
 	gbs.SendPacket(packet)
 	return nil
 }
+
+func GBSReadFlash(filename string, size int64, finished chan bool, progress chan int64, errchan chan error) error {
+	// finishing
+	defer func() { finished <- true }()
+
+	// open rom file
+	rom, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer rom.Close()
+
+	// open GBShooper
+	gbs := comms.GBSDevice{}
+	err = gbs.Open()
+	if err != nil {
+		return err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// start reading
+	chunks := size / BUFFER_SIZE
+	buffer := make([]byte, BUFFER_SIZE)
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_READ_FLASH}
+	// send it
+	gbs.SendPacket(packet)
+
+	for n := range chunks {
+		// calculate progress
+		percent := n * BUFFER_SIZE * 100 / size
+		progress <- percent
+
+		// read buffer and calculate checksum
+		var check uint8 = 0
+		for i := range BUFFER_SIZE {
+			buffer[i], err = gbs.ReceiveByte(SLEEPTIME)
+			if err != nil {
+				errchan <- err
+				return err
+			}
+			check += buffer[i]
+		}
+		// write buffer in file
+		rom.Write(buffer)
+
+		// send checksum
+		packet = comms.Packet{Type: comms.TYPE_DATA, Data: check}
+		gbs.SendPacket(packet)
+
+		// read answer
+		stat, err := gbs.ReceivePacket(SLEEPTIME)
+		if err != nil {
+			errchan <- err
+			return err
+		}
+		// cheksum bad?
+		if stat.Data == comms.CMD_END {
+			errchan <- errors.New("Bad checksum")
+			return errors.New("Bad checksum")
+		}
+
+		// ok, continue
+		if n < chunks-1 {
+			packet = comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_READ_FLASH}
+			gbs.SendPacket(packet)
+		}
+	}
+
+	// finished
+	packet = comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+	gbs.SendPacket(packet)
+
+	finished <- true
+	return nil
+}

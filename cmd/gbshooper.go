@@ -32,6 +32,25 @@ func GBSHelp() {
 	fmt.Println("\t --erase-flash: clears the contents of the flash chip.")
 	fmt.Print("\t --read-flash: reads the contents of the flash chip ")
 	fmt.Println("and writes it on [file].")
+	fmt.Println("\t\toptions:")
+	fmt.Println("\t\t  --size N: Specify ROM size:")
+	fmt.Print("\t\t\t 1=32KB, 2=64KB, 3=128KB, 4=256KB, 5=512KB, 6=1MB, ")
+	fmt.Println("7=2MB, 8=4MB")
+	fmt.Println("\t\t If no size is specified, 32KB are read")
+	fmt.Println("\t --write-flash: writes the flash with contents from [file].")
+	fmt.Print("\t --read-ram: reads the contents of the save RAM ")
+	fmt.Println("and writes it on [file].")
+	fmt.Println("\t\toptions:")
+	fmt.Println("\t\t  --size N: Specify RAM size:")
+	fmt.Println("\t\t\t 1=8KB, 2=32KB, 3=1MB")
+	fmt.Println("\t\t If no size is specified, 8KB are read")
+	fmt.Println("\t --write-ram: writes the save RAM with contents from [file].")
+	fmt.Println("\t --erase-ram: clears the contents of the save RAM with 0's.")
+	fmt.Println("\t\toptions:")
+	fmt.Println("\t\t  --size N: Specify RAM size:")
+	fmt.Println("\t\t\t 1=8KB, 2=32KB, 3=1MB")
+	fmt.Println("\t\t If no size is specified, 8KB are erased")
+	fmt.Println("\t --help: show this help.\n")
 }
 
 func GBSVersion() {
@@ -136,11 +155,11 @@ func main() {
 		go func() {
 			err = flashcart.GBSWriteFlash(romFile, finished, progress)
 		}()
-	outer:
+	writeflash_outer:
 		for {
 			select {
 			case <-finished:
-				break outer
+				break writeflash_outer
 			case percent := <-progress:
 				bar.Set(int(percent))
 			}
@@ -153,5 +172,75 @@ func main() {
 		}
 		bar.Clear()
 		fmt.Println(color.Green + "✅ FLASH written." + color.Reset)
+	}
+
+	if os.Args[1] == "--read-flash" {
+		if len(os.Args) < 3 {
+			GBSHelp()
+			os.Exit(1)
+		}
+		var size int64 = 0
+		romFile := ""
+		if os.Args[2] == "--size" {
+			s, _ := strconv.Atoi(os.Args[3])
+			switch s {
+			case 1:
+				size = flashcart.S_32K
+			case 2:
+				size = flashcart.S_64K
+			case 3:
+				size = flashcart.S_128K
+			case 4:
+				size = flashcart.S_256K
+			case 5:
+				size = flashcart.S_512K
+			case 6:
+				size = flashcart.S_1MB
+			case 7:
+				size = flashcart.S_2MB
+			case 8:
+				size = flashcart.S_4MB
+			default:
+				size = flashcart.S_32K
+			}
+			romFile = os.Args[4]
+		} else {
+			romFile = os.Args[2]
+			size = flashcart.S_32K
+		}
+
+		// sync
+		progress := make(chan int64)
+		finished := make(chan bool)
+		errchan := make(chan error)
+		var err error
+
+		// start
+		bar := progressbar.NewOptions(100, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetWidth(20), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
+		GBSVersion()
+		fmt.Println(color.Yellow + "📖 Reading FLASH... " + color.Reset)
+		go func() {
+			flashcart.GBSReadFlash(romFile, size, finished, progress, errchan)
+		}()
+	outerreadflash:
+		for {
+			select {
+			case <-finished:
+				break outerreadflash
+			case percent := <-progress:
+				bar.Set(int(percent))
+			case e := <-errchan:
+				err = e
+				break outerreadflash
+			}
+		}
+
+		if err != nil {
+			bar.Clear()
+			fmt.Println("❌ "+color.Red+"Error reading flash: ", err.Error())
+			os.Exit(1)
+		}
+		bar.Clear()
+		fmt.Println(color.Green + "✅ FLASH read." + color.Reset)
 	}
 }
