@@ -147,13 +147,14 @@ func main() {
 		// sync
 		progress := make(chan int64)
 		finished := make(chan bool)
+		errchan := make(chan error)
 
 		// start
 		bar := progressbar.NewOptions(100, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetWidth(20), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
 		GBSVersion()
 		fmt.Println(color.Yellow + "📝 Writing FLASH... " + color.Reset)
 		go func() {
-			err = flashcart.GBSWriteFlash(romFile, finished, progress)
+			err = flashcart.GBSWriteFlash(romFile, finished, progress, errchan)
 		}()
 	writeflash_outer:
 		for {
@@ -162,6 +163,9 @@ func main() {
 				break writeflash_outer
 			case percent := <-progress:
 				bar.Set(int(percent))
+			case e := <-errchan:
+				err = e
+				break writeflash_outer
 			}
 		}
 
@@ -182,6 +186,10 @@ func main() {
 		var size int64 = 0
 		romFile := ""
 		if os.Args[2] == "--size" {
+			if len(os.Args) < 5 {
+				GBSHelp()
+				os.Exit(1)
+			}
 			s, _ := strconv.Atoi(os.Args[3])
 			switch s {
 			case 1:
@@ -242,5 +250,176 @@ func main() {
 		}
 		bar.Clear()
 		fmt.Println(color.Green + "✅ FLASH read." + color.Reset)
+	}
+
+	if os.Args[1] == "--write-ram" {
+		if len(os.Args) < 3 {
+			GBSHelp()
+			os.Exit(1)
+		}
+
+		ramFile := os.Args[2]
+
+		// check we can open the file
+		ram, err := os.Open(ramFile)
+		if err != nil {
+			fmt.Println("❌ "+color.Red+"Can't open file: ", os.Args[2])
+			os.Exit(1)
+		}
+		ram.Close()
+
+		// sync
+		progress := make(chan int64)
+		finished := make(chan bool)
+
+		// start
+		bar := progressbar.NewOptions(100, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetWidth(20), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
+		GBSVersion()
+		fmt.Println(color.Yellow + "📝 Writing RAM... " + color.Reset)
+		go func() {
+			err = flashcart.GBSWriteRAM(ramFile, finished, progress)
+		}()
+	writeram_outer:
+		for {
+			select {
+			case <-finished:
+				break writeram_outer
+			case percent := <-progress:
+				bar.Set(int(percent))
+			}
+		}
+
+		if err != nil {
+			bar.Clear()
+			fmt.Println("❌ "+color.Red+"Error writing RAM: ", err.Error())
+			os.Exit(1)
+		}
+		bar.Clear()
+		fmt.Println(color.Green + "✅ RAM written." + color.Reset)
+	}
+
+	if os.Args[1] == "--read-ram" {
+		if len(os.Args) < 3 {
+			GBSHelp()
+			os.Exit(1)
+		}
+		var size int64 = 0
+		ramFile := ""
+		if os.Args[2] == "--size" {
+			if len(os.Args) < 5 {
+				GBSHelp()
+				os.Exit(1)
+			}
+			s, _ := strconv.Atoi(os.Args[3])
+			switch s {
+			case 1:
+				size = flashcart.S_8K
+			case 2:
+				size = flashcart.S_32K
+			case 3:
+				size = flashcart.S_1MB
+			default:
+				size = flashcart.S_8K
+			}
+			ramFile = os.Args[4]
+		} else {
+			ramFile = os.Args[2]
+			size = flashcart.S_32K
+		}
+
+		// sync
+		progress := make(chan int64)
+		finished := make(chan bool)
+		errchan := make(chan error)
+		var err error
+
+		// start
+		bar := progressbar.NewOptions(100, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetWidth(20), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
+		GBSVersion()
+		fmt.Println(color.Yellow + "📖 Reading RAM... " + color.Reset)
+		go func() {
+			flashcart.GBSReadRAM(ramFile, size, finished, progress, errchan)
+		}()
+	outerreadram:
+		for {
+			select {
+			case <-finished:
+				break outerreadram
+			case percent := <-progress:
+				bar.Set(int(percent))
+			case e := <-errchan:
+				err = e
+				break outerreadram
+			}
+		}
+
+		if err != nil {
+			bar.Clear()
+			fmt.Println("❌ "+color.Red+"Error reading RAM: ", err.Error())
+			os.Exit(1)
+		}
+		bar.Clear()
+		fmt.Println(color.Green + "✅ RAM read." + color.Reset)
+	}
+
+	if os.Args[1] == "--erase-ram" {
+		if len(os.Args) < 3 {
+			GBSHelp()
+			os.Exit(1)
+		}
+		var size int64 = 0
+		if os.Args[2] == "--size" {
+			if len(os.Args) < 4 {
+				GBSHelp()
+				os.Exit(1)
+			}
+			s, _ := strconv.Atoi(os.Args[3])
+			switch s {
+			case 1:
+				size = flashcart.S_8K
+			case 2:
+				size = flashcart.S_32K
+			case 3:
+				size = flashcart.S_1MB
+			default:
+				size = flashcart.S_8K
+			}
+		} else {
+			size = flashcart.S_32K
+		}
+
+		// sync
+		progress := make(chan int64)
+		finished := make(chan bool)
+		errchan := make(chan error)
+		var err error
+
+		// start
+		bar := progressbar.NewOptions(100, progressbar.OptionClearOnFinish(), progressbar.OptionSetPredictTime(false), progressbar.OptionSetWidth(20), progressbar.OptionSetTheme(progressbar.ThemeUnicode))
+		GBSVersion()
+		fmt.Println(color.Yellow + "🧼  Erasing RAM... " + color.Reset)
+		go func() {
+			flashcart.GBSEraseRAM(size, finished, progress, errchan)
+		}()
+	outereraseram:
+		for {
+			select {
+			case <-finished:
+				break outereraseram
+			case percent := <-progress:
+				bar.Set(int(percent))
+			case e := <-errchan:
+				err = e
+				break outereraseram
+			}
+		}
+
+		if err != nil {
+			bar.Clear()
+			fmt.Println("❌ "+color.Red+"Error erasing RAM: ", err.Error())
+			os.Exit(1)
+		}
+		bar.Clear()
+		fmt.Println(color.Green + "✅ RAM erased." + color.Reset)
 	}
 }

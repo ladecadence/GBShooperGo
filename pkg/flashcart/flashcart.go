@@ -327,13 +327,14 @@ func GBSEraseFlash() error {
 	}
 }
 
-func GBSWriteFlash(filename string, finished chan bool, progress chan int64) error {
+func GBSWriteFlash(filename string, finished chan bool, progress chan int64, errchan chan error) error {
 	// finishing
 	defer func() { finished <- true }()
 
 	// open rom file
 	rom, err := os.Open(filename)
 	if err != nil {
+		errchan <- err
 		return err
 	}
 	defer rom.Close()
@@ -341,6 +342,7 @@ func GBSWriteFlash(filename string, finished chan bool, progress chan int64) err
 	// get file size
 	stats, err := rom.Stat()
 	if err != nil {
+		errchan <- err
 		return err
 	}
 	romSize := stats.Size()
@@ -349,6 +351,7 @@ func GBSWriteFlash(filename string, finished chan bool, progress chan int64) err
 	gbs := comms.GBSDevice{}
 	err = gbs.Open()
 	if err != nil {
+		errchan <- err
 		return err
 	}
 	defer gbs.Close()
@@ -368,6 +371,7 @@ func GBSWriteFlash(filename string, finished chan bool, progress chan int64) err
 		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
 		// send it
 		gbs.SendPacket(packet)
+		errchan <- err
 		return err
 	}
 	if stat.Data == STAT_OK {
@@ -400,6 +404,7 @@ func GBSWriteFlash(filename string, finished chan bool, progress chan int64) err
 				packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
 				// send it
 				gbs.SendPacket(packet)
+				errchan <- errors.New("Bad checksum")
 				return errors.New("Bad checksum")
 			}
 
@@ -420,6 +425,7 @@ func GBSWriteFlash(filename string, finished chan bool, progress chan int64) err
 		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
 		// send it
 		gbs.SendPacket(packet)
+		errchan <- errors.New("Problem with hardware, can't write to Flash")
 		return errors.New("Problem with hardware, can't write to Flash")
 	}
 
@@ -503,5 +509,252 @@ func GBSReadFlash(filename string, size int64, finished chan bool, progress chan
 	gbs.SendPacket(packet)
 
 	finished <- true
+	return nil
+}
+
+func GBSWriteRAM(filename string, finished chan bool, progress chan int64) error {
+	// finishing
+	defer func() { finished <- true }()
+
+	// open RAM file
+	ram, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer ram.Close()
+
+	// get file size
+	stats, err := ram.Stat()
+	if err != nil {
+		return err
+	}
+	romSize := stats.Size()
+
+	// open GBShooper
+	gbs := comms.GBSDevice{}
+	err = gbs.Open()
+	if err != nil {
+		return err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// and start writing
+	var chunkCounter int64 = 0
+	buffer := make([]byte, BUFFER_SIZE)
+
+	// create packet
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_PRG_RAM}
+	// send it
+	gbs.SendPacket(packet)
+
+	stat, err := gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+		// send it
+		gbs.SendPacket(packet)
+		return err
+	}
+	if stat.Data == STAT_OK {
+		for {
+			// calculate percentage
+			percent := (100 * chunkCounter * BUFFER_SIZE) / romSize
+			progress <- percent
+
+			// read a chunk
+			_, err := ram.Read(buffer)
+			if err != nil {
+				// end?
+				if err == io.EOF {
+					break
+				}
+
+			}
+			// checksum
+			var check uint8 = 0
+			for i := range BUFFER_SIZE {
+				check += buffer[i]
+			}
+
+			// send the data
+			err = gbs.SendBuffer(buffer)
+			// get answer
+			stat, err := gbs.ReceivePacket(SLEEPTIME)
+			// checksum correct?
+			if stat.Data != check {
+				packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+				// send it
+				gbs.SendPacket(packet)
+				return errors.New("Bad checksum")
+			}
+
+			// EOF?
+			c := make([]uint8, 1)
+			_, err = ram.Read(c)
+			if err != io.EOF {
+				// ok, keep writing
+				ram.Seek(-1, 1)
+				packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_PRG_RAM}
+				// send it
+				gbs.SendPacket(packet)
+				chunkCounter++
+			}
+
+		}
+	} else {
+		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+		// send it
+		gbs.SendPacket(packet)
+		return errors.New("Problem with hardware, can't write to RAM")
+	}
+
+	// end
+	packet = comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+	// send it
+	gbs.SendPacket(packet)
+	return nil
+}
+
+func GBSReadRAM(filename string, size int64, finished chan bool, progress chan int64, errchan chan error) error {
+	// finishing
+	defer func() { finished <- true }()
+
+	// open rom file
+	rom, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer rom.Close()
+
+	// open GBShooper
+	gbs := comms.GBSDevice{}
+	err = gbs.Open()
+	if err != nil {
+		return err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// start reading
+	chunks := size / BUFFER_SIZE
+	buffer := make([]byte, BUFFER_SIZE)
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_READ_RAM}
+	// send it
+	gbs.SendPacket(packet)
+
+	for n := range chunks {
+		// calculate progress
+		percent := n * BUFFER_SIZE * 100 / size
+		progress <- percent
+
+		// read buffer and calculate checksum
+		var check uint8 = 0
+		for i := range BUFFER_SIZE {
+			buffer[i], err = gbs.ReceiveByte(SLEEPTIME)
+			if err != nil {
+				errchan <- err
+				return err
+			}
+			check += buffer[i]
+		}
+		// write buffer in file
+		rom.Write(buffer)
+
+		// send checksum
+		packet = comms.Packet{Type: comms.TYPE_DATA, Data: check}
+		gbs.SendPacket(packet)
+
+		// read answer
+		stat, err := gbs.ReceivePacket(SLEEPTIME)
+		if err != nil {
+			errchan <- err
+			return err
+		}
+		// cheksum bad?
+		if stat.Data == comms.CMD_END {
+			errchan <- errors.New("Bad checksum")
+			return errors.New("Bad checksum")
+		}
+
+		// ok, continue
+		if n < chunks-1 {
+			packet = comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_READ_RAM}
+			gbs.SendPacket(packet)
+		}
+	}
+
+	// finished
+	packet = comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+	gbs.SendPacket(packet)
+
+	finished <- true
+	return nil
+}
+
+func GBSEraseRAM(size int64, finished chan bool, progress chan int64, errchan chan error) error {
+	// finishing
+	defer func() { finished <- true }()
+
+	// open GBShooper
+	gbs := comms.GBSDevice{}
+	err := gbs.Open()
+	if err != nil {
+		errchan <- err
+		return err
+	}
+	defer gbs.Close()
+	gbs.Dev.PurgeReadBuffer()
+
+	// and start erasing
+	var chunkCounter int64 = 0
+
+	// create packet
+	packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_ERASE_RAM}
+	// send it
+	gbs.SendPacket(packet)
+
+	stat, err := gbs.ReceivePacket(SLEEPTIME)
+	if err != nil {
+		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+		// send it
+		gbs.SendPacket(packet)
+		errchan <- err
+		return err
+	}
+	if stat.Data == STAT_OK {
+		for range size / BUFFER_SIZE {
+			// calculate percentage
+			percent := (100 * chunkCounter * BUFFER_SIZE) / size
+			progress <- percent
+
+			// get answer
+			stat, _ := gbs.ReceivePacket(SLEEPTIME)
+			// ok?
+			if stat.Data != STAT_OK {
+				packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+				// send it
+				gbs.SendPacket(packet)
+				errchan <- errors.New("Error erasing")
+				return errors.New("Error erasing")
+			}
+
+			// continue
+			packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_ERASE_RAM}
+			// send it
+			gbs.SendPacket(packet)
+			chunkCounter++
+		}
+	} else {
+		packet := comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+		// send it
+		gbs.SendPacket(packet)
+		errchan <- errors.New("Problem with hardware, can't erase RAM")
+		return errors.New("Problem with hardware, can't erase RAM")
+	}
+
+	// end
+	packet = comms.Packet{Type: comms.TYPE_COMMAND, Data: comms.CMD_END}
+	// send it
+	gbs.SendPacket(packet)
 	return nil
 }
