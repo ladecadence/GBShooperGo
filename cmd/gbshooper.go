@@ -422,4 +422,9 @@ func main() {
 		bar.Clear()
 		fmt.Println(color.Green + "✅ RAM erased." + color.Reset)
 	}
+
+	if os.Args[1] == "--help" {
+		GBSHelp()
+		os.Exit(0)
+	}
 }
